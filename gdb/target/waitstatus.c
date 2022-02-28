@@ -17,8 +17,31 @@
    You should have received a copy of the GNU General Public License
    along with this program.  If not, see <http://www.gnu.org/licenses/>.  */
 
+#include "defs.h"
 #include "gdbsupport/common-defs.h"
+#include "solist.h"
 #include "waitstatus.h"
+
+target_so_event::~target_so_event ()
+{
+  {
+    while (loaded_sos)
+      {
+	struct so_list *so = loaded_sos;
+	loaded_sos = so->next;
+
+	free_so (so);
+      }
+
+    while (unloaded_sos)
+      {
+	struct so_list *so = unloaded_sos;
+	unloaded_sos = so->next;
+
+	free_so (so);
+      }
+  }
+}
 
 /* See waitstatus.h.  */
 

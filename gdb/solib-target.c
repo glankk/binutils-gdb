@@ -25,7 +25,9 @@
 #include "target.h"
 #include "solib-target.h"
 #include <vector>
+#include <memory>
 #include "inferior.h"
+#include "gdbsupport/rsp-low.h"
 
 /* Private data for each loaded library.  */
 struct lm_info_target : public lm_info_base
@@ -275,6 +277,80 @@ solib_target_current_sos (void)
   return start;
 }
 
+static target_so_event *
+solib_target_parse_so_event (const char *p)
+{
+  if (*p != '+' && *p != '-')
+    return NULL;
+
+  std::unique_ptr<target_so_event> so_event (new target_so_event ());
+
+  while (*p == '+' || *p == '-')
+    {
+      struct so_list **so_link;
+
+      if (*p++ == '+')
+        so_link = &so_event->loaded_sos;
+      else
+        so_link = &so_event->unloaded_sos;
+
+      const char *name = p;
+      size_t name_length = 0;
+      while (*p != '\0' && *p != ',' && *p != ';')
+	{
+	  p++;
+	  name_length++;
+	}
+
+      if (name_length == 0)
+        return NULL;
+
+      if (name_length > SO_NAME_MAX_PATH_SIZE - 1)
+        continue;
+
+      std::unique_ptr<so_list, so_deleter> so (XCNEW (so_list));
+
+      memcpy (so->so_name, name, name_length);
+      so->so_name[name_length] = '\0';
+
+      memcpy (so->so_original_name, name, name_length);
+      so->so_original_name[name_length] = '\0';
+
+      lm_info_target *info = new lm_info_target ();
+      so->lm_info = info;
+
+      if (*p == ',')
+	{
+	  p++;
+
+	  char offset_type = *p++;
+	  std::vector<CORE_ADDR> *offset_vec;
+
+	  if (offset_type == 'S')
+	    offset_vec = &info->segment_bases;
+	  else if (offset_type == 's')
+	    offset_vec = &info->section_bases;
+	  else
+	    return NULL;
+
+	  while (*p == ',')
+	    {
+	      ULONGEST address = 0;
+	      p = unpack_varlen_hex (++p, &address);
+	      offset_vec->push_back (address);
+	    }
+	}
+
+      so->next = *so_link;
+      *so_link = so.release ();
+    }
+
+  if (*p != ';')
+    return NULL;
+
+  return so_event.release ();
+}
+
 static void
 solib_target_solib_create_inferior_hook (int from_tty)
 {
@@ -443,6 +519,7 @@ const struct target_so_ops solib_target_so_ops =
   solib_target_clear_solib,
   solib_target_solib_create_inferior_hook,
   solib_target_current_sos,
+  solib_target_parse_so_event,
   solib_target_open_symbol_file_object,
   solib_target_in_dynsym_resolve_code,
   solib_bfd_open,

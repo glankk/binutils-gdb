@@ -31,6 +31,8 @@ struct lm_info_base
 {
 };
 
+struct target_so_event;
+
 struct so_list
 {
   /* The following fields of the structure come directly from the
@@ -112,6 +114,8 @@ struct target_so_ops
      we provide values for.  */
   struct so_list *(*current_sos) (void);
 
+  target_so_event *(*parse_so_event) (const char *p);
+
   /* Find, open, and read the symbols for the main executable.  If
      FROM_TTY is non-zero, allow messages to be printed.  */
   int (*open_symbol_file_object) (int from_ttyp);
@@ -157,7 +161,7 @@ struct target_so_ops
      performed before solib_add is called.  This pointer can be
      NULL, in which case no specific preprocessing is necessary
      for this target.  */
-  void (*handle_event) (void);
+  void (*handle_event) (target_so_event *so_event);
 };
 
 using so_list_range = next_range<so_list>;
