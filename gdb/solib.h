@@ -25,6 +25,7 @@ struct so_list;
 struct target_ops;
 struct target_so_ops;
 struct program_space;
+struct target_so_event;
 
 #include "symfile-add-flags.h"
 
@@ -35,7 +36,7 @@ extern void clear_solib (void);
 
 /* Called to add symbols from a shared library to gdb's symbol table.  */
 
-extern void solib_add (const char *, int, int);
+extern void solib_add (const char *, int, int, target_so_event *so_event);
 extern bool solib_read_symbols (struct so_list *, symfile_add_flags);
 
 /* Function to be called when the inferior starts up, to discover the
@@ -44,6 +45,8 @@ extern bool solib_read_symbols (struct so_list *, symfile_add_flags);
    read in their symbols at a later time.  */
 
 extern void solib_create_inferior_hook (int from_tty);
+
+extern target_so_event *solib_parse_event (const char *p);
 
 /* If ADDR lies in a shared library, return its name.  */
 
@@ -93,6 +96,9 @@ extern void set_solib_ops (struct gdbarch *gdbarch,
 
 extern void update_solib_list (int from_tty);
 
+extern void update_solib_list_from_event (target_so_event *so_event,
+					  int from_tty);
+
 /* Return true if NAME is the libpthread shared library.  */
 
 extern bool libpthread_name_p (const char *name);
@@ -124,6 +130,6 @@ extern void update_solib_breakpoints (void);
 
 /* Handle an solib event by calling solib_add.  */
 
-extern void handle_solib_event (void);
+extern void handle_solib_event (target_so_event *so_event);
 
 #endif /* SOLIB_H */
