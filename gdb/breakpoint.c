@@ -5934,7 +5934,7 @@ bpstat_stop_status (const address_space *aspace,
     {
       if (bs->breakpoint_at && bs->breakpoint_at->type == bp_shlib_event)
 	{
-	  handle_solib_event ();
+	  handle_solib_event (ws.so_event ());
 	  break;
 	}
     }

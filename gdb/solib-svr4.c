@@ -1495,7 +1495,7 @@ svr4_fetch_objfile_link_map (struct objfile *objfile)
 
   /* Cause svr4_current_sos() to be run if it hasn't been already.  */
   if (info->main_lm_addr == 0)
-    solib_add (NULL, 0, auto_solib_add);
+    solib_add (NULL, 0, auto_solib_add, NULL);
 
   /* svr4_current_sos() will set main_lm_addr for the main executable.  */
   if (objfile == current_program_space->symfile_object_file)
@@ -1852,7 +1852,7 @@ disable_probes_interface (svr4_info *info)
    standard interface.  */
 
 static void
-svr4_handle_solib_event (void)
+svr4_handle_solib_event (target_so_event *so_event)
 {
   struct svr4_info *info = get_svr4_info (current_program_space);
   struct probe_and_action *pa;
@@ -2236,7 +2236,7 @@ enable_break (struct svr4_info *info, int from_tty)
      mean r_brk has already been relocated.  Assume the dynamic linker
      is the object containing r_brk.  */
 
-  solib_add (NULL, from_tty, auto_solib_add);
+  solib_add (NULL, from_tty, auto_solib_add, NULL);
   sym_addr = 0;
   if (info->debug_base && solib_svr4_r_map (info->debug_base) != 0)
     sym_addr = solib_svr4_r_brk (info);
@@ -2410,7 +2410,7 @@ enable_break (struct svr4_info *info, int from_tty)
 	  info->debug_loader_name = xstrdup (interp_name);
 	  info->debug_loader_offset_p = 1;
 	  info->debug_loader_offset = load_addr;
-	  solib_add (NULL, from_tty, auto_solib_add);
+	  solib_add (NULL, from_tty, auto_solib_add, NULL);
 	}
 
       /* Record the relocated start and end address of the dynamic linker

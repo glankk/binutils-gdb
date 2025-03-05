@@ -23,8 +23,10 @@
 #include "symfile.h"
 #include "target.h"
 #include "solib-target.h"
+#include <memory>
 #include <vector>
 #include "inferior.h"
+#include "gdbsupport/rsp-low.h"
 
 /* Private data for each loaded library.  */
 struct lm_info_target final : public lm_info
@@ -256,6 +258,74 @@ solib_target_current_sos (void)
   return sos;
 }
 
+static target_so_event *
+solib_target_parse_so_event (const char *p)
+{
+  if (*p != '+' && *p != '-')
+    return NULL;
+
+  std::unique_ptr<target_so_event> so_event (new target_so_event);
+
+  while (*p == '+' || *p == '-')
+    {
+      owning_intrusive_list<solib> *so_list;
+
+      if (*p++ == '+')
+	so_list = &so_event->loaded_sos;
+      else
+	so_list = &so_event->unloaded_sos;
+
+      const char *name = p;
+      size_t name_length = 0;
+      while (*p != '\0' && *p != ',' && *p != ';')
+	{
+	  p++;
+	  name_length++;
+	}
+
+      if (name_length == 0)
+	return NULL;
+
+      solib_up so = solib_up (new solib);
+
+      so->so_name = std::string (name, name_length);
+      so->so_original_name = std::string (name, name_length);
+
+      lm_info_target *info = new lm_info_target;
+
+      if (*p == ',')
+	{
+	  p++;
+
+	  char offset_type = *p++;
+	  std::vector<CORE_ADDR> *offset_vec;
+
+	  if (offset_type == 'S')
+	    offset_vec = &info->segment_bases;
+	  else if (offset_type == 's')
+	    offset_vec = &info->section_bases;
+	  else
+	    return NULL;
+
+	  while (*p == ',')
+	    {
+	      ULONGEST address = 0;
+	      p = unpack_varlen_hex (++p, &address);
+	      offset_vec->push_back (address);
+	    }
+	}
+
+      so->lm_info = lm_info_up (info);
+
+      so_list->push_back (std::move (so));
+    }
+
+  if (*p != ';')
+    return NULL;
+
+  return so_event.release ();
+}
+
 static void
 solib_target_solib_create_inferior_hook (int from_tty)
 {
@@ -406,6 +476,7 @@ const solib_ops solib_target_so_ops =
   nullptr,
   solib_target_solib_create_inferior_hook,
   solib_target_current_sos,
+  solib_target_parse_so_event,
   solib_target_open_symbol_file_object,
   solib_target_in_dynsym_resolve_code,
   solib_bfd_open,

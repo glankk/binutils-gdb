@@ -884,6 +884,188 @@ Do you need \"%ps\" or \"%ps\"?"),
     }
 }
 
+void
+update_solib_list_from_event (target_so_event *so_event, int from_tty)
+{
+  const solib_ops *ops = gdbarch_so_ops (current_inferior ()->arch ());
+
+  /* We can reach here due to changing solib-search-path or the
+     sysroot, before having any inferior.  */
+  if (target_has_execution () && inferior_ptid != null_ptid)
+    {
+      struct inferior *inf = current_inferior ();
+
+      /* If we are attaching to a running process for which we
+	 have not opened a symbol file, we may be able to get its
+	 symbols now!  */
+      if (inf->attach_flag
+	  && current_program_space->symfile_object_file == NULL)
+	{
+	  try
+	    {
+	      ops->open_symbol_file_object (from_tty);
+	    }
+	  catch (const gdb_exception_error &ex)
+	    {
+	      exception_fprintf (gdb_stderr, ex,
+				 "Error reading attached "
+				 "process's symbol file.\n");
+	    }
+	}
+    }
+
+  owning_intrusive_list<solib>::iterator gdb_iter
+    = current_program_space->so_list.begin ();
+  while (gdb_iter != current_program_space->so_list.end ())
+    {
+      intrusive_list<solib>::iterator loaded_iter
+	= so_event->loaded_sos.begin ();
+
+      intrusive_list<solib>::iterator unloaded_iter
+	= so_event->unloaded_sos.begin ();
+
+      /* Check to see whether the shared object *gdb also appears in
+	 the events's lists.  */
+      for (; loaded_iter != so_event->loaded_sos.end (); ++loaded_iter)
+	{
+	  if (ops->same)
+	    {
+	      if (ops->same (*gdb_iter, *loaded_iter))
+		break;
+	    }
+	  else
+	    {
+	      if (! filename_cmp (gdb_iter->so_original_name.c_str (),
+				  loaded_iter->so_original_name.c_str ()))
+		break;
+	    }
+	}
+
+      for (; unloaded_iter != so_event->unloaded_sos.end (); ++unloaded_iter)
+	{
+	  if (ops->same)
+	    {
+	      if (ops->same (*gdb_iter, *unloaded_iter))
+		break;
+	    }
+	  else
+	    {
+	      if (! filename_cmp (gdb_iter->so_original_name.c_str (),
+				  unloaded_iter->so_original_name.c_str ()))
+		break;
+	    }
+	}
+
+      /* If the shared object appears on both the event's loaded list
+	 and GDB's list, we don't need to do anything.  Delete it from
+	 the event's list and leave it on GDB's list.  */
+      if (loaded_iter != so_event->loaded_sos.end ())
+	{
+	  so_event->loaded_sos.erase (loaded_iter);
+	}
+
+      /* If the shared object appears on both the event's unloaded list
+	 and GDB's list, delete it from both lists.  */
+      if (unloaded_iter != so_event->unloaded_sos.end ())
+	{
+	  so_event->unloaded_sos.erase (unloaded_iter);
+
+	  /* Notify any observer that the shared object has been
+	     unloaded before we remove it from GDB's tables.  */
+	  notify_solib_unloaded (current_program_space, *gdb_iter);
+
+	  current_program_space->deleted_solibs.push_back (gdb_iter->so_name);
+
+	  /* Unless the user loaded it explicitly, free SO's objfile.  */
+	  if (gdb_iter->objfile != nullptr
+	      && !(gdb_iter->objfile->flags & OBJF_USERLOADED)
+	      && !solib_used (current_program_space, *gdb_iter))
+	    gdb_iter->objfile->unlink ();
+
+	  /* Some targets' section tables might be referring to
+	     sections from so->abfd; remove them.  */
+	  current_program_space->remove_target_sections (&*gdb_iter);
+
+	  gdb_iter = current_program_space->so_list.erase (gdb_iter);
+	}
+      else
+	{
+	  ++gdb_iter;
+	}
+    }
+
+  /* Now the event's loaded list contains only shared objects that don't
+     appear in GDB's list --- those that are newly loaded.  Add them
+     to GDB's shared object list.  */
+  if (!so_event->loaded_sos.empty ())
+    {
+      int not_found = 0;
+      const char *not_found_filename = NULL;
+
+      /* Fill in the rest of each of the `so' nodes.  */
+      for (solib &new_so : so_event->loaded_sos)
+	{
+	  current_program_space->added_solibs.push_back (&new_so);
+
+	  try
+	    {
+	      /* Fill in the rest of the `struct solib' node.  */
+	      if (!solib_map_sections (new_so))
+		{
+		  not_found++;
+		  if (not_found_filename == NULL)
+		    not_found_filename = new_so.so_original_name.c_str ();
+		}
+	    }
+
+	  catch (const gdb_exception_error &e)
+	    {
+	      exception_fprintf (gdb_stderr, e,
+				 _("Error while mapping shared "
+				   "library sections:\n"));
+	    }
+
+	  /* Notify any observer that the shared object has been
+	     loaded now that we've added it to GDB's tables.  */
+	  notify_solib_loaded (new_so);
+	}
+
+      /* Add the new shared objects to GDB's list.  */
+      current_program_space->so_list.splice (std::move (so_event->loaded_sos));
+
+      /* If a library was not found, issue an appropriate warning
+	 message.  We have to use a single call to warning in case the
+	 front end does something special with warnings, e.g., pop up
+	 a dialog box.  It Would Be Nice if we could get a "warning: "
+	 prefix on each line in the CLI front end, though - it doesn't
+	 stand out well.  */
+
+      if (not_found == 1)
+	warning (_ ("Could not load shared library symbols for %ps.\n"
+		    "Do you need \"%ps\" or \"%ps\"?"),
+		 styled_string (file_name_style.style (),
+				not_found_filename),
+		 styled_string (command_style.style (),
+				"set solib-search-path"),
+		 styled_string (command_style.style (), "set sysroot"));
+      else if (not_found > 1)
+	warning (_ ("\
+Could not load shared library symbols for %d libraries, e.g. %ps.\n\
+Use the \"%ps\" command to see the complete listing.\n\
+Do you need \"%ps\" or \"%ps\"?"),
+		 not_found,
+		 styled_string (file_name_style.style (),
+				not_found_filename),
+		 styled_string (command_style.style (),
+				"info sharedlibrary"),
+		 styled_string (command_style.style (),
+				"set solib-search-path"),
+		 styled_string (command_style.style (),
+				"set sysroot"));
+
+    }
+}
+
 /* Return non-zero if NAME is the libpthread shared library.
 
    Uses a fairly simplistic heuristic approach where we check
@@ -919,7 +1101,8 @@ libpthread_solib_p (const solib &so)
    FROM_TTY is described for update_solib_list, above.  */
 
 void
-solib_add (const char *pattern, int from_tty, int readsyms)
+solib_add (const char *pattern, int from_tty, int readsyms,
+	   target_so_event *so_event)
 {
   if (print_symbol_loading_p (from_tty, 0, 0))
     {
@@ -942,7 +1125,10 @@ solib_add (const char *pattern, int from_tty, int readsyms)
 	error (_ ("Invalid regexp: %s"), re_err);
     }
 
-  update_solib_list (from_tty);
+  if (so_event)
+    update_solib_list_from_event (so_event, from_tty);
+  else
+    update_solib_list (from_tty);
 
   /* Walk the list of currently loaded shared libraries, and read
      symbols for any that match the pattern --- or any whose symbols
@@ -1181,6 +1367,17 @@ solib_create_inferior_hook (int from_tty)
   ops->solib_create_inferior_hook (from_tty);
 }
 
+target_so_event *
+solib_parse_event (const char *p)
+{
+  const solib_ops *ops = gdbarch_so_ops (current_inferior ()->arch ());
+
+  if (ops->parse_so_event)
+    return ops->parse_so_event (p);
+  else
+    return NULL;
+}
+
 /* See solib.h.  */
 
 bool
@@ -1197,7 +1394,7 @@ static void
 sharedlibrary_command (const char *args, int from_tty)
 {
   dont_repeat ();
-  solib_add (args, from_tty, 1);
+  solib_add (args, from_tty, 1, NULL);
 }
 
 /* See solib.h.  */
@@ -1239,12 +1436,12 @@ update_solib_breakpoints (void)
 /* See solib.h.  */
 
 void
-handle_solib_event (void)
+handle_solib_event (target_so_event *so_event)
 {
   const solib_ops *ops = gdbarch_so_ops (current_inferior ()->arch ());
 
   if (ops->handle_event != NULL)
-    ops->handle_event ();
+    ops->handle_event (so_event);
 
   current_inferior ()->pspace->clear_solib_cache ();
 
@@ -1252,7 +1449,7 @@ handle_solib_event (void)
      be adding them automatically.  Switch terminal for any messages
      produced by breakpoint_re_set.  */
   target_terminal::ours_for_output ();
-  solib_add (NULL, 0, auto_solib_add);
+  solib_add (NULL, 0, auto_solib_add, so_event);
   target_terminal::inferior ();
 }
 
@@ -1360,7 +1557,7 @@ reload_shared_libraries (const char *ignored, int from_tty,
      removed.  Call it only after the solib target has been initialized by
      solib_create_inferior_hook.  */
 
-  solib_add (NULL, 0, auto_solib_add);
+  solib_add (NULL, 0, auto_solib_add, NULL);
 
   breakpoint_re_set ();
 

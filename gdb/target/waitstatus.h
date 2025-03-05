@@ -22,6 +22,10 @@
 
 #include "diagnostics.h"
 #include "gdb/signals.h"
+#include "gdb/solist.h"
+#include "gdbsupport/gdb_signals.h"
+#include "gdbsupport/owning_intrusive_list.h"
+#include <memory>
 
 /* Stuff for target_wait.  */
 
@@ -171,6 +175,12 @@ DIAGNOSTIC_POP
   gdb_assert_not_reached ("invalid target_waitkind value: %d\n", (int) kind);
 }
 
+struct target_so_event
+{
+  owning_intrusive_list<solib> loaded_sos;
+  owning_intrusive_list<solib> unloaded_sos;
+};
+
 struct target_waitstatus
 {
   /* Default constructor.  */
@@ -263,10 +273,11 @@ struct target_waitstatus
     return *this;
   }
 
-  target_waitstatus &set_loaded ()
+  target_waitstatus &set_loaded (target_so_event *so_event)
   {
     this->reset ();
     m_kind = TARGET_WAITKIND_LOADED;
+    m_value.so_event.reset(so_event);
     return *this;
   }
 
@@ -414,6 +425,12 @@ struct target_waitstatus
     return m_value.syscall_number;
   }
 
+  target_so_event *so_event () const
+  {
+    gdb_assert (m_kind == TARGET_WAITKIND_LOADED);
+    return m_value.so_event.get();
+  }
+
   /* Return a pretty printed form of target_waitstatus.
 
      This is only meant to be used in debug messages, not for user-visible
@@ -427,13 +444,15 @@ private:
     if (m_kind == TARGET_WAITKIND_EXECD)
       xfree (m_value.execd_pathname);
 
+    m_value.so_event.reset();
+
     m_kind = TARGET_WAITKIND_IGNORE;
   }
 
   target_waitkind m_kind = TARGET_WAITKIND_IGNORE;
 
   /* Additional information about the event.  */
-  union
+  struct
     {
       /* Exit status */
       int exit_status;
@@ -445,6 +464,8 @@ private:
       char *execd_pathname;
       /* Syscall number */
       int syscall_number;
+      /* Solib event information */
+      std::shared_ptr<target_so_event> so_event;
     } m_value {};
 };
 

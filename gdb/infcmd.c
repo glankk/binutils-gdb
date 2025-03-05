@@ -288,7 +288,7 @@ post_create_inferior (int from_tty)
 	  /* If the solist is global across processes, there's no need to
 	     refetch it here.  */
 	  if (!gdbarch_has_global_solist (current_inferior ()->arch ()))
-	    solib_add (nullptr, 0, auto_solib_add);
+	    solib_add (nullptr, 0, auto_solib_add, nullptr);
 	}
     }
 

@@ -18,6 +18,7 @@
 #ifndef GDB_COMMAND_H
 #define GDB_COMMAND_H
 
+#include "gdb/defs.h"
 #include "gdbsupport/scoped_restore.h"
 
 struct completion_tracker;

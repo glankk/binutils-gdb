@@ -5208,7 +5208,7 @@ remote_target::start_remote_1 (int from_tty, int extended_p)
   /* On OSs where the list of libraries is global to all
      processes, we fetch them early.  */
   if (gdbarch_has_global_solist (current_inferior ()->arch ()))
-    solib_add (NULL, from_tty, auto_solib_add);
+    solib_add (NULL, from_tty, auto_solib_add, NULL);
 
   if (target_is_non_stop_p ())
     {
@@ -8099,7 +8099,9 @@ Packet: '%s'\n"),
 	    }
 	  else if (strprefix (p, p1, "library"))
 	    {
-	      event->ws.set_loaded ();
+	      target_so_event *so_event = solib_parse_event (p1 + 1);
+
+	      event->ws.set_loaded (so_event);
 	      p = strchrnul (p1 + 1, ';');
 	    }
 	  else if (strprefix (p, p1, "replaylog"))

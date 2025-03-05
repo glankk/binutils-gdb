@@ -38,6 +38,8 @@ struct lm_info
 
 using lm_info_up = std::unique_ptr<lm_info>;
 
+struct target_so_event;
+
 struct solib : intrusive_list_node<solib>
 {
   /* Free symbol-file related contents of SO and reset for possible reloading
@@ -125,6 +127,8 @@ struct solib_ops
      we provide values for.  */
   owning_intrusive_list<solib> (*current_sos) ();
 
+  target_so_event *(*parse_so_event) (const char *p);
+
   /* Find, open, and read the symbols for the main executable.  If
      FROM_TTY is non-zero, allow messages to be printed.  */
   int (*open_symbol_file_object) (int from_ttyp);
@@ -162,7 +166,7 @@ struct solib_ops
      performed before solib_add is called.  This pointer can be
      NULL, in which case no specific preprocessing is necessary
      for this target.  */
-  void (*handle_event) (void);
+  void (*handle_event) (target_so_event *so_event);
 
   /* Return an address within the inferior's address space which is known
      to be part of SO.  If there is no such address, or GDB doesn't know
